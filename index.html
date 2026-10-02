@@ -119,7 +119,7 @@
 
     <button id="confirmar" class="btn" disabled>Confirmar</button>
     <div id="msg1" class="msg"></div>
-    <div class="nota" style="text-align:right;margin-top:14px;opacity:.6">Versión 2026-10-02 · v8</div>
+    <div class="nota" style="text-align:right;margin-top:14px;opacity:.6">Versión 2026-10-02 · v9</div>
   </section>
 
   <!-- PASO 2: resultados -->
@@ -201,6 +201,9 @@ const REPS_PERMITIDOS = [
   "Montserrat Najera",
   "Uriel Castellanos",
 ];
+// Viajes con estos estatus NO se consideran en los resultados (columna de estatus, ej. columna G)
+const ESTATUS_EXCLUIDOS = ["Cancelled", "Draft", "Hold"];
+
 // Moneda de UTILIDAD según la DIVISION del viaje
 const MONEDA_POR_DIVISION = {
   "national":      "MXN",
@@ -212,7 +215,9 @@ const MONEDA_POR_DIVISION = {
 
 const $ = id => document.getElementById(id);
 let encabezados = [], filas = [];
-let COL_FECHA = 8, COL_REP = 9, COL_RECOL = 7, COL_PROV = 2, COL_UTIL = 6, COL_DIV = 5;   // valores de respaldo; se recalculan al leer el archivo
+// valores de respaldo; se recalculan al leer el archivo
+let COL_FECHA = 9, COL_REP = 10, COL_RECOL = 8, COL_PROV = 2, COL_UTIL = 7, COL_DIV = 5, COL_STATUS = 6;
+let COLS = [];   // columnas que se muestran en la tabla
 
 // Fecha de hoy en formato dd/mm/aaaa
 const hoy = new Date();
@@ -301,9 +306,12 @@ async function cargar(){
     if (iUtil >= 0) COL_UTIL = iUtil;
     const iDiv  = fila1.findIndex(h => norm(h).includes("division"));
     if (iDiv  >= 0) COL_DIV  = iDiv;
+    const iStat = fila1.findIndex(h => /\b(estatus|status)\b/.test(norm(h)));
+    COL_STATUS = iStat >= 0 ? iStat : 6;   // si no se encuentra por nombre, se usa la columna G
 
-    // La tabla muestra desde la columna A hasta la columna del Rep, con los títulos de la fila 1
+    // La tabla muestra desde la columna A hasta la columna del Rep (sin la de estatus), con los títulos de la fila 1
     encabezados = fila1.slice(0, COL_REP + 1);
+    COLS = encabezados.map((_,i) => i).filter(i => i !== COL_STATUS);
     filas = datos.slice(1).filter(f => f.some(c => String(c).trim()!==""));
 
     const sel = $("rep");
@@ -329,6 +337,7 @@ function mostrar(){
   resultados = filas.filter(f => {
     const k = claveFecha(f[COL_FECHA]);
     return k !== null && k >= kIni && k <= kFin &&
+           !estatusExcluido(f[COL_STATUS]) &&
            partesRep(f[COL_REP]).some(p => norm(p)===norm(rep));
   });
 
@@ -347,6 +356,13 @@ function mostrar(){
   $("paso2").classList.remove("oculto");
   $("wrap").classList.add("ancho");
 }
+
+// true si el estatus del viaje está en la lista de excluidos (Cancelled, Draft, Hold…)
+const EXCLUIDOS_N = ESTATUS_EXCLUIDOS.map(norm);
+const estatusExcluido = v => {
+  const e = norm(v);
+  return e !== "" && EXCLUIDOS_N.some(x => e === x || e.split(/[\s\-_/]+/).includes(x));
+};
 
 /* ---------- Ordenar, filtrar y paginar ---------- */
 let resultados = [], pagina = 1;
@@ -383,7 +399,8 @@ function vistaActual(){
 // Encabezados: fila 1 en mayúsculas; la de recolección con nombre fijo; botón de orden en cada uno
 const titulo = (h,i) => i===COL_RECOL ? "FECHA DE RECOLECCIÓN" : String(h).toUpperCase();
 function pintarEncabezados(){
-  $("thead").innerHTML = "<tr>" + encabezados.map((h,i) => {
+  $("thead").innerHTML = "<tr>" + COLS.map(i => {
+    const h = encabezados[i];
     const activo = orden.col === i;
     const flecha = activo ? (orden.dir === 1 ? "▲" : "▼") : "⇅";
     const tip    = activo && orden.dir === 1 ? "Ordenar Z-A" : "Ordenar A-Z";
@@ -438,7 +455,7 @@ function pintarPagina(){
   const vista = lista.slice(desde, desde + porPag);
 
   $("tbody").innerHTML = vista.map(f =>
-    "<tr>" + encabezados.map((_,i)=>celda(f[i],i,f)).join("") + "</tr>").join("");
+    "<tr>" + COLS.map(i=>celda(f[i],i,f)).join("") + "</tr>").join("");
 
   $("vacio").textContent = resultados.length === 0
     ? "No hay registros para este Rep en las fechas seleccionadas."
