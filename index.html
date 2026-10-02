@@ -46,6 +46,7 @@
            font-size:.8rem;letter-spacing:.02em;padding:11px 10px;white-space:nowrap;position:sticky;top:0}
   tbody td{padding:9px 10px;border-top:1px solid var(--borde);vertical-align:top}
   td.nowrap, tbody td:first-child{white-space:nowrap}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
   tbody tr:nth-child(even){background:#fbf9fe}
   tbody tr:hover{background:var(--lila-claro)}
   .vacio{padding:32px;text-align:center;color:var(--gris)}
@@ -118,7 +119,7 @@
 
     <button id="confirmar" class="btn" disabled>Confirmar</button>
     <div id="msg1" class="msg"></div>
-    <div class="nota" style="text-align:right;margin-top:14px;opacity:.6">Versión 2026-10-02 · v7</div>
+    <div class="nota" style="text-align:right;margin-top:14px;opacity:.6">Versión 2026-10-02 · v8</div>
   </section>
 
   <!-- PASO 2: resultados -->
@@ -200,11 +201,18 @@ const REPS_PERMITIDOS = [
   "Montserrat Najera",
   "Uriel Castellanos",
 ];
+// Moneda de UTILIDAD según la DIVISION del viaje
+const MONEDA_POR_DIVISION = {
+  "national":      "MXN",
+  "port freight":  "MXN",
+  "crossborder":   "USD",
+  "domestic":      "USD",
+};
 /* ================================================= */
 
 const $ = id => document.getElementById(id);
 let encabezados = [], filas = [];
-let COL_FECHA = 8, COL_REP = 9, COL_RECOL = 7, COL_PROV = 2;   // valores de respaldo; se recalculan al leer el archivo
+let COL_FECHA = 8, COL_REP = 9, COL_RECOL = 7, COL_PROV = 2, COL_UTIL = 6, COL_DIV = 5;   // valores de respaldo; se recalculan al leer el archivo
 
 // Fecha de hoy en formato dd/mm/aaaa
 const hoy = new Date();
@@ -289,6 +297,10 @@ async function cargar(){
     COL_RECOL = fila1.findIndex(h => norm(h).includes("recoleccion"));   // -1 si no existe
     const iProv = fila1.findIndex(h => norm(h).includes("proveedor"));
     if (iProv >= 0) COL_PROV = iProv;
+    const iUtil = fila1.findIndex(h => norm(h).includes("utilidad"));
+    if (iUtil >= 0) COL_UTIL = iUtil;
+    const iDiv  = fila1.findIndex(h => norm(h).includes("division"));
+    if (iDiv  >= 0) COL_DIV  = iDiv;
 
     // La tabla muestra desde la columna A hasta la columna del Rep, con los títulos de la fila 1
     encabezados = fila1.slice(0, COL_REP + 1);
@@ -395,10 +407,23 @@ function pintarEncabezados(){
   if (bf) bf.onclick = e => { e.stopPropagation(); abrirFiltro(bf); };
 }
 
-// Celdas: recolección solo fecha; booked fecha + hora
-function celda(v, i){
+// "$2,500.00" + National -> "$2,500.00 MXN"; Crossborder -> "$400.00 USD"
+function fmtUtilidad(v, division){
+  const t = String(v ?? "").trim();
+  if (t === "") return "";
+  const n = parseFloat(t.replace(/[$,\s]/g, ""));
+  if (isNaN(n)) return t;                                          // no es número: se deja igual
+  const moneda = MONEDA_POR_DIVISION[norm(division)] || "";
+  const monto  = (n < 0 ? "-$" : "$") +
+                 Math.abs(n).toLocaleString("en-US", { minimumFractionDigits:2, maximumFractionDigits:2 });
+  return moneda ? `${monto} ${moneda}` : monto;
+}
+
+// Celdas: recolección solo fecha; booked fecha + hora; utilidad con moneda
+function celda(v, i, f){
   if (i===COL_RECOL) return `<td class="nowrap">${esc(fmtFecha(v,false))}</td>`;
   if (i===COL_FECHA) return `<td class="nowrap">${esc(fmtFecha(v,true))}</td>`;
+  if (i===COL_UTIL)  return `<td class="nowrap num">${esc(fmtUtilidad(v, f[COL_DIV]))}</td>`;
   return `<td>${esc(v??"")}</td>`;
 }
 
@@ -413,7 +438,7 @@ function pintarPagina(){
   const vista = lista.slice(desde, desde + porPag);
 
   $("tbody").innerHTML = vista.map(f =>
-    "<tr>" + encabezados.map((_,i)=>celda(f[i],i)).join("") + "</tr>").join("");
+    "<tr>" + encabezados.map((_,i)=>celda(f[i],i,f)).join("") + "</tr>").join("");
 
   $("vacio").textContent = resultados.length === 0
     ? "No hay registros para este Rep en las fechas seleccionadas."
