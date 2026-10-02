@@ -22,7 +22,10 @@
   label{display:block;font-weight:600;margin:16px 0 6px;font-size:.9rem}
   input,select{width:100%;padding:11px 12px;border:1px solid var(--borde);border-radius:9px;
         font-size:1rem;background:#fff;color:var(--texto)}
-  input[readonly]{background:var(--lila-claro);color:var(--morado);font-weight:600}
+  input[type=date]{background:var(--lila-claro);color:var(--morado);font-weight:600;font-family:inherit;cursor:pointer}
+  .fechas{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .fechas label{margin-top:16px}
+  .nota{font-size:.8rem;color:var(--gris);margin-top:6px}
   button{cursor:pointer;border:0;border-radius:9px;padding:12px 18px;font-size:1rem;font-weight:600}
   .btn{background:var(--morado);color:#fff;width:100%;margin-top:22px}
   .btn:hover{background:#5a3289}
@@ -53,13 +56,22 @@
   <!-- PASO 1: confirmar Rep y fecha -->
   <section id="paso1" class="card">
     <h1>Daily Books per Rep</h1>
-    <p class="sub">Confirma tu nombre para ver tu información del día.</p>
+    <p class="sub">Confirma tu nombre para ver tu información.</p>
 
     <label for="rep">Nombre del Rep</label>
     <select id="rep" disabled><option>Cargando…</option></select>
 
-    <label for="fecha">Fecha de hoy</label>
-    <input id="fecha" readonly>
+    <div class="fechas">
+      <div>
+        <label for="inicio">Fecha inicio</label>
+        <input type="date" id="inicio">
+      </div>
+      <div>
+        <label for="fin">Fecha fin</label>
+        <input type="date" id="fin">
+      </div>
+    </div>
+    <div class="nota">Por defecto se muestra el día de hoy. Cámbialas solo si quieres ver otro periodo.</div>
 
     <button id="confirmar" class="btn" disabled>Confirmar</button>
     <div id="msg1" class="msg"></div>
@@ -83,7 +95,7 @@
         <thead id="thead"></thead>
         <tbody id="tbody"></tbody>
       </table>
-      <div id="vacio" class="vacio oculto">No hay registros para este Rep en la fecha de hoy.</div>
+      <div id="vacio" class="vacio oculto">No hay registros para este Rep en las fechas seleccionadas.</div>
     </div>
   </section>
 
@@ -106,8 +118,23 @@ let encabezados = [], filas = [];
 // Fecha de hoy en formato dd/mm/aaaa
 const hoy = new Date();
 const pad = n => String(n).padStart(2,"0");
-const FECHA_HOY = `${pad(hoy.getDate())}/${pad(hoy.getMonth()+1)}/${hoy.getFullYear()}`;
-$("fecha").value = FECHA_HOY;
+const HOY_ISO = `${hoy.getFullYear()}-${pad(hoy.getMonth()+1)}-${pad(hoy.getDate())}`;
+$("inicio").value = HOY_ISO;
+$("fin").value    = HOY_ISO;
+
+// "2026-10-01" -> "01/10/2026" (para mostrar)
+const isoADmy = iso => { const [a,m,d] = iso.split("-"); return `${d}/${m}/${a}`; };
+
+// Convierte una fecha del archivo a número comparable aaaammdd (o null si no es fecha)
+function claveFecha(v){
+  const s = String(v||"").trim();
+  let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);       // 01/10/2026
+  if (m) return +(m[3] + pad(m[2]) + pad(m[1]));
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);                       // 2026-10-01
+  if (m) return +(m[1] + pad(m[2]) + pad(m[3]));
+  return null;
+}
+const isoAClave = iso => +iso.replace(/-/g,"");
 
 // Normaliza textos para comparar nombres (sin acentos, mayúsculas ni espacios extra)
 const norm = s => String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
@@ -174,11 +201,20 @@ function esc(s){ return String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;"
 
 function mostrar(){
   const rep = $("rep").value;
-  const res = filas.filter(f =>
-    partesRep(f[COL_REP]).some(p => norm(p)===norm(rep)) && normFecha(f[COL_FECHA])===FECHA_HOY);
+  let ini = $("inicio").value || HOY_ISO, fin = $("fin").value || HOY_ISO;
+  if (ini > fin) [ini, fin] = [fin, ini];          // si las pusieron al revés, se acomodan
+  const kIni = isoAClave(ini), kFin = isoAClave(fin);
+
+  const res = filas.filter(f => {
+    const k = claveFecha(f[COL_FECHA]);
+    return k !== null && k >= kIni && k <= kFin &&
+           partesRep(f[COL_REP]).some(p => norm(p)===norm(rep));
+  }).sort((a,b) => (claveFecha(a[COL_FECHA]) - claveFecha(b[COL_FECHA])) ||
+                   String(a[COL_FECHA]).localeCompare(String(b[COL_FECHA])));   // por fecha y hora
 
   $("chipRep").textContent   = "Rep: " + rep;
-  $("chipFecha").textContent = "Fecha: " + FECHA_HOY;
+  $("chipFecha").textContent = ini===fin ? "Fecha: " + isoADmy(ini)
+                                         : `Del ${isoADmy(ini)} al ${isoADmy(fin)}`;
   $("chipTotal").textContent = res.length + (res.length===1 ? " registro" : " registros");
 
   $("thead").innerHTML = "<tr>" + encabezados.map(h=>`<th>${esc(h)}</th>`).join("") + "</tr>";
