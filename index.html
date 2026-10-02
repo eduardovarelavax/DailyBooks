@@ -58,7 +58,39 @@
   .pag-btns button{padding:8px 12px;font-size:.88rem}
   .pag-btns button:disabled{opacity:.4;cursor:not-allowed}
   #pagInfo{padding:0 8px;font-weight:600;color:var(--morado)}
-  .oculto{display:none}
+  /* Encabezados con orden y filtro */
+  thead th{padding:0}
+  .th-in{display:flex;align-items:stretch}
+  .th-orden{flex:1;display:flex;align-items:center;gap:6px;background:none;color:#fff;border-radius:0;
+            padding:11px 10px;font:inherit;text-transform:inherit;letter-spacing:inherit;text-align:left;white-space:nowrap}
+  .th-orden:hover{background:rgba(255,255,255,.12)}
+  .th-orden .flecha{font-size:.7rem;opacity:.45}
+  .th-orden.on .flecha{opacity:1}
+  .th-filtro{background:none;color:#fff;border-radius:6px;padding:0 9px;margin:6px 6px 6px 0;display:flex;align-items:center;opacity:.75}
+  .th-filtro:hover{background:rgba(255,255,255,.18);opacity:1}
+  .th-filtro.on{background:#fff;color:var(--morado);opacity:1}
+  .chip-prov{display:inline-flex;align-items:center;gap:6px;background:var(--morado);color:#fff}
+  .chip-prov button{background:none;color:#fff;padding:0 2px;font-size:1rem;line-height:1}
+
+  /* Ventana de filtro */
+  .pop{position:absolute;z-index:50;width:300px;background:#fff;border:1px solid var(--borde);border-radius:12px;
+       box-shadow:0 12px 32px rgba(43,36,51,.18);padding:14px}
+  .pop-tit{font-weight:700;color:var(--morado);margin-bottom:10px}
+  .pop input[type=search]{padding:8px 10px;font-size:.9rem}
+  .pop-acc{display:flex;gap:14px;margin:8px 0 6px}
+  .lnk{background:none;padding:0;font-size:.82rem;color:var(--morado);font-weight:600}
+  .lnk:hover{text-decoration:underline}
+  .prov-lista{max-height:260px;overflow:auto;border-top:1px solid var(--borde);border-bottom:1px solid var(--borde);margin:0 -14px;padding:4px 0}
+  .prov-item{display:flex;align-items:center;gap:8px;margin:0;padding:7px 14px;font-weight:400;font-size:.88rem;cursor:pointer}
+  .prov-item:hover{background:var(--lila-claro)}
+  .prov-item input{width:auto;accent-color:var(--morado)}
+  .prov-nom{flex:1}
+  .prov-n{font-size:.78rem;color:var(--gris);background:var(--lila-claro);border-radius:999px;padding:1px 8px}
+  .pop-pie{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+  .pop-pie button{padding:8px 14px;font-size:.88rem}
+  .btn-ok{background:var(--morado);color:#fff}
+  .btn-ok:hover{background:#5a3289}
+  .oculto{display:none !important}
 </style>
 </head>
 <body>
@@ -86,7 +118,7 @@
 
     <button id="confirmar" class="btn" disabled>Confirmar</button>
     <div id="msg1" class="msg"></div>
-    <div class="nota" style="text-align:right;margin-top:14px;opacity:.6">Versión 2026-10-02 · v6</div>
+    <div class="nota" style="text-align:right;margin-top:14px;opacity:.6">Versión 2026-10-02 · v7</div>
   </section>
 
   <!-- PASO 2: resultados -->
@@ -98,6 +130,8 @@
           <span class="chip" id="chipRep"></span>
           <span class="chip" id="chipFecha"></span>
           <span class="chip" id="chipTotal"></span>
+          <span class="chip chip-prov oculto" id="chipProv"><span id="chipProvTxt"></span>
+            <button id="chipProvX" title="Quitar filtro">×</button></span>
         </div>
       </div>
       <div class="acciones">
@@ -133,6 +167,21 @@
 
 </div>
 
+<!-- Ventana del filtro de proveedor -->
+<div id="popProv" class="pop oculto" role="dialog" aria-label="Filtrar proveedor">
+  <div class="pop-tit">Filtrar proveedor</div>
+  <input id="provBuscar" type="search" placeholder="Buscar proveedor…">
+  <div class="pop-acc">
+    <button id="provTodos" class="lnk">Seleccionar todos</button>
+    <button id="provNinguno" class="lnk">Quitar todos</button>
+  </div>
+  <div id="provLista" class="prov-lista"></div>
+  <div class="pop-pie">
+    <button id="provLimpiar" class="btn-sec">Quitar filtro</button>
+    <button id="provAplicar" class="btn-ok">Aplicar</button>
+  </div>
+</div>
+
 <script>
 /* ================= CONFIGURACIÓN =================
    PUB_ID: ID del archivo publicado en la web (2PACX-...)
@@ -155,7 +204,7 @@ const REPS_PERMITIDOS = [
 
 const $ = id => document.getElementById(id);
 let encabezados = [], filas = [];
-let COL_FECHA = 8, COL_REP = 9, COL_RECOL = 7;   // valores de respaldo; se recalculan al leer el archivo
+let COL_FECHA = 8, COL_REP = 9, COL_RECOL = 7, COL_PROV = 2;   // valores de respaldo; se recalculan al leer el archivo
 
 // Fecha de hoy en formato dd/mm/aaaa
 const hoy = new Date();
@@ -167,29 +216,35 @@ $("fin").value    = HOY_ISO;
 // "2026-10-01" -> "01/10/2026" (para mostrar)
 const isoADmy = iso => { const [a,m,d] = iso.split("-"); return `${d}/${m}/${a}`; };
 
-// Convierte una fecha del archivo a número comparable aaaammdd (o null si no es fecha)
-function claveFecha(v){
+// Lee una fecha del archivo (01/10/2026, 2026-10-01, con o sin hora, 24 h o a. m./p. m.)
+function leerFecha(v){
   const s = String(v||"").trim();
-  let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);       // 01/10/2026
-  if (m) return +(m[3] + pad(m[2]) + pad(m[1]));
-  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);                       // 2026-10-01
-  if (m) return +(m[1] + pad(m[2]) + pad(m[3]));
-  return null;
+  let d, m, a, x;
+  if ((x = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/)))      [d, m, a] = [x[1], x[2], x[3]];
+  else if ((x = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)))             [a, m, d] = [x[1], x[2], x[3]];
+  else return null;
+  const resto = s.slice(x[0].length);
+  let H = null, M = null;
+  const h = resto.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*([ap])?\.?\s*m?/i);
+  if (h){
+    H = +h[1]; M = +h[2];
+    if (h[3]){ const pm = h[3].toLowerCase()==="p"; if (pm && H<12) H += 12; if (!pm && H===12) H = 0; }
+  }
+  return { d:+d, m:+m, a:+a, H, M };
 }
+
+// Número comparable aaaammdd (solo día) — para el filtro de fechas
+function claveFecha(v){ const f = leerFecha(v); return f ? f.a*10000 + f.m*100 + f.d : null; }
+// Número comparable aaaammddHHMM — para ordenar con hora
+function claveFechaHora(v){ const f = leerFecha(v); return f ? (f.a*10000 + f.m*100 + f.d)*10000 + (f.H??0)*100 + (f.M??0) : null; }
 const isoAClave = iso => +iso.replace(/-/g,"");
 
 // Da formato dd/mm/aaaa (y opcionalmente HH:MM) a cualquier fecha del archivo
 function fmtFecha(v, conHora){
-  const s = String(v||"").trim();
-  let d, m, a;
-  let x = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);   // 01/10/2026
-  if (x) [d, m, a] = [x[1], x[2], x[3]];
-  else if ((x = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)))         // 2026-10-01
-    [a, m, d] = [x[1], x[2], x[3]];
-  else return s;                                                   // no es fecha: se deja igual
-  let r = `${pad(d)}/${pad(m)}/${a}`;
-  const h = s.match(/(\d{1,2}):(\d{2})/);
-  if (conHora && h) r += ` ${pad(h[1])}:${h[2]}`;
+  const f = leerFecha(v);
+  if (!f) return String(v??"");                                    // no es fecha: se deja igual
+  let r = `${pad(f.d)}/${pad(f.m)}/${f.a}`;
+  if (conHora && f.H !== null) r += ` ${pad(f.H)}:${pad(f.M)}`;
   return r;
 }
 
@@ -232,6 +287,8 @@ async function cargar(){
     if (iRep   >= 0) COL_REP   = iRep;
     if (iFecha >= 0) COL_FECHA = iFecha;
     COL_RECOL = fila1.findIndex(h => norm(h).includes("recoleccion"));   // -1 si no existe
+    const iProv = fila1.findIndex(h => norm(h).includes("proveedor"));
+    if (iProv >= 0) COL_PROV = iProv;
 
     // La tabla muestra desde la columna A hasta la columna del Rep, con los títulos de la fila 1
     encabezados = fila1.slice(0, COL_REP + 1);
@@ -257,24 +314,21 @@ function mostrar(){
   if (ini > fin) [ini, fin] = [fin, ini];          // si las pusieron al revés, se acomodan
   const kIni = isoAClave(ini), kFin = isoAClave(fin);
 
-  const res = filas.filter(f => {
+  resultados = filas.filter(f => {
     const k = claveFecha(f[COL_FECHA]);
     return k !== null && k >= kIni && k <= kFin &&
            partesRep(f[COL_REP]).some(p => norm(p)===norm(rep));
-  }).sort((a,b) => (claveFecha(a[COL_FECHA]) - claveFecha(b[COL_FECHA])) ||
-                   String(a[COL_FECHA]).localeCompare(String(b[COL_FECHA])));   // por fecha y hora
+  });
 
   $("chipRep").textContent   = "Rep: " + rep;
   $("chipFecha").textContent = ini===fin ? "Fecha: " + isoADmy(ini)
                                          : `Del ${isoADmy(ini)} al ${isoADmy(fin)}`;
-  $("chipTotal").textContent = res.length + (res.length===1 ? " registro" : " registros");
 
-  // Encabezados: fila 1 en mayúsculas; la de recolección con nombre fijo
-  const titulo = (h,i) => i===COL_RECOL ? "FECHA DE RECOLECCIÓN" : String(h).toUpperCase();
-  $("thead").innerHTML = "<tr>" + encabezados.map((h,i)=>`<th>${esc(titulo(h,i))}</th>`).join("") + "</tr>";
-
-  resultados = res;
+  // Estado inicial: ordenado por Fecha Booked (más antiguo primero), sin filtro de proveedor
+  orden = { col: COL_FECHA, dir: 1 };
+  provSel = null;
   pagina = 1;
+  pintarEncabezados();
   pintarPagina();
 
   $("paso1").classList.add("oculto");
@@ -282,8 +336,64 @@ function mostrar(){
   $("wrap").classList.add("ancho");
 }
 
-/* ---------- Paginación ---------- */
+/* ---------- Ordenar, filtrar y paginar ---------- */
 let resultados = [], pagina = 1;
+let orden   = { col: null, dir: 1 };   // dir 1 = A-Z / menor a mayor, -1 = Z-A / mayor a menor
+let provSel = null;                    // null = todos los proveedores; Set = solo los elegidos
+
+const valorProv = f => String(f[COL_PROV] ?? "").trim() || "(Sin proveedor)";
+
+// Valor para ordenar según el tipo de columna
+function valorOrden(f, i){
+  const v = String(f[i] ?? "").trim();
+  if (v === "") return null;
+  if (i===COL_FECHA || i===COL_RECOL) return claveFechaHora(v);
+  if (/^-?\$?-?[\d,]+(\.\d+)?$/.test(v)) return parseFloat(v.replace(/[$,]/g,""));   // dinero / números
+  return v;
+}
+function comparar(a, b){
+  const i = orden.col, va = valorOrden(a,i), vb = valorOrden(b,i);
+  if (va === null && vb === null) return 0;
+  if (va === null) return 1;                       // vacíos siempre al final
+  if (vb === null) return -1;
+  const r = (typeof va === "number" && typeof vb === "number")
+            ? va - vb
+            : String(va).localeCompare(String(vb), "es", { numeric:true, sensitivity:"base" });
+  return r * orden.dir;
+}
+
+function vistaActual(){
+  let lista = provSel ? resultados.filter(f => provSel.has(valorProv(f))) : resultados.slice();
+  if (orden.col !== null) lista.sort(comparar);
+  return lista;
+}
+
+// Encabezados: fila 1 en mayúsculas; la de recolección con nombre fijo; botón de orden en cada uno
+const titulo = (h,i) => i===COL_RECOL ? "FECHA DE RECOLECCIÓN" : String(h).toUpperCase();
+function pintarEncabezados(){
+  $("thead").innerHTML = "<tr>" + encabezados.map((h,i) => {
+    const activo = orden.col === i;
+    const flecha = activo ? (orden.dir === 1 ? "▲" : "▼") : "⇅";
+    const tip    = activo && orden.dir === 1 ? "Ordenar Z-A" : "Ordenar A-Z";
+    const filtro = i === COL_PROV
+      ? `<button class="th-filtro${provSel ? " on" : ""}" data-filtro title="Filtrar proveedor">
+           <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M3 5h18l-7 8.5V19l-4 2v-7.5z"/></svg>
+         </button>` : "";
+    return `<th><div class="th-in">
+              <button class="th-orden${activo ? " on" : ""}" data-col="${i}" title="${tip}">
+                <span>${esc(titulo(h,i))}</span><span class="flecha">${flecha}</span>
+              </button>${filtro}
+            </div></th>`;
+  }).join("") + "</tr>";
+
+  $("thead").querySelectorAll("[data-col]").forEach(b => b.onclick = () => {
+    const i = +b.dataset.col;
+    orden = orden.col === i ? { col:i, dir:-orden.dir } : { col:i, dir:1 };
+    pagina = 1; pintarEncabezados(); pintarPagina();
+  });
+  const bf = $("thead").querySelector("[data-filtro]");
+  if (bf) bf.onclick = e => { e.stopPropagation(); abrirFiltro(bf); };
+}
 
 // Celdas: recolección solo fecha; booked fecha + hora
 function celda(v, i){
@@ -293,19 +403,33 @@ function celda(v, i){
 }
 
 function pintarPagina(){
+  const lista   = vistaActual();
   const porPag  = +$("porPagina").value;
-  const total   = resultados.length;
+  const total   = lista.length;
   const paginas = Math.max(1, Math.ceil(total / porPag));
   pagina = Math.min(Math.max(1, pagina), paginas);
 
   const desde = (pagina - 1) * porPag;
-  const vista = resultados.slice(desde, desde + porPag);
+  const vista = lista.slice(desde, desde + porPag);
 
   $("tbody").innerHTML = vista.map(f =>
     "<tr>" + encabezados.map((_,i)=>celda(f[i],i)).join("") + "</tr>").join("");
+
+  $("vacio").textContent = resultados.length === 0
+    ? "No hay registros para este Rep en las fechas seleccionadas."
+    : "Ningún viaje coincide con el filtro de proveedor.";
   $("vacio").classList.toggle("oculto", total>0);
 
-  // Controles
+  // Chips
+  const n = resultados.length;
+  $("chipTotal").textContent = provSel
+    ? `${total} de ${n} registros`
+    : n + (n===1 ? " registro" : " registros");
+  $("chipProv").classList.toggle("oculto", !provSel);
+  if (provSel) $("chipProvTxt").textContent =
+    "Proveedor: " + (provSel.size === 1 ? [...provSel][0] : `${provSel.size} seleccionados`);
+
+  // Controles de página
   $("paginador").classList.toggle("oculto", total===0);
   $("rango").textContent   = `Mostrando ${desde + 1}–${desde + vista.length} de ${total}`;
   $("pagInfo").textContent = `Página ${pagina} de ${paginas}`;
@@ -313,6 +437,59 @@ function pintarPagina(){
   $("ultima").disabled  = $("siguiente").disabled = pagina >= paginas;
 }
 
+/* ---------- Filtro de proveedor ---------- */
+function abrirFiltro(boton){
+  const pop = $("popProv");
+  if (!pop.classList.contains("oculto")) { cerrarFiltro(); return; }
+
+  // Proveedores de los resultados actuales (Rep + fechas), con su número de viajes
+  const conteo = new Map();
+  resultados.forEach(f => { const p = valorProv(f); conteo.set(p, (conteo.get(p)||0) + 1); });
+  const provs = [...conteo.keys()].sort((a,b) => a.localeCompare(b, "es", {sensitivity:"base"}));
+
+  $("provLista").innerHTML = provs.map(p => `
+    <label class="prov-item">
+      <input type="checkbox" value="${esc(p)}" ${!provSel || provSel.has(p) ? "checked" : ""}>
+      <span class="prov-nom">${esc(p)}</span><span class="prov-n">${conteo.get(p)}</span>
+    </label>`).join("");
+  $("provBuscar").value = "";
+
+  const r = boton.getBoundingClientRect();
+  pop.classList.remove("oculto");
+  const ancho = pop.offsetWidth;
+  pop.style.top  = (r.bottom + window.scrollY + 6) + "px";
+  pop.style.left = Math.max(8, Math.min(r.left + window.scrollX - 10,
+                                        window.scrollX + document.documentElement.clientWidth - ancho - 8)) + "px";
+  $("provBuscar").focus();
+}
+function cerrarFiltro(){ $("popProv").classList.add("oculto"); }
+
+$("provBuscar").oninput = () => {
+  const q = norm($("provBuscar").value);
+  $("provLista").querySelectorAll(".prov-item").forEach(el =>
+    el.style.display = norm(el.textContent).includes(q) ? "" : "none");
+};
+$("provTodos").onclick = () => $("provLista").querySelectorAll("input").forEach(c => {
+  if (c.closest(".prov-item").style.display !== "none") c.checked = true; });
+$("provNinguno").onclick = () => $("provLista").querySelectorAll("input").forEach(c => {
+  if (c.closest(".prov-item").style.display !== "none") c.checked = false; });
+$("provAplicar").onclick = () => {
+  const checks = [...$("provLista").querySelectorAll("input")];
+  const elegidos = checks.filter(c => c.checked).map(c => c.value);
+  provSel = elegidos.length === checks.length ? null : new Set(elegidos);
+  pagina = 1; cerrarFiltro(); pintarEncabezados(); pintarPagina();
+};
+const quitarFiltro = () => { provSel = null; pagina = 1; cerrarFiltro(); pintarEncabezados(); pintarPagina(); };
+$("provLimpiar").onclick = quitarFiltro;
+$("chipProvX").onclick   = quitarFiltro;
+
+document.addEventListener("click", e => {
+  if (!$("popProv").contains(e.target)) cerrarFiltro();
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") cerrarFiltro(); });
+window.addEventListener("resize", cerrarFiltro);
+
+/* ---------- Navegación de páginas ---------- */
 const irA = n => { pagina = n; pintarPagina(); $("paso2").scrollIntoView({behavior:"smooth", block:"start"}); };
 $("primera").onclick   = () => irA(1);
 $("anterior").onclick  = () => irA(pagina - 1);
@@ -321,7 +498,7 @@ $("ultima").onclick    = () => irA(Infinity);
 $("porPagina").onchange = () => { pagina = 1; pintarPagina(); };
 
 $("confirmar").onclick = mostrar;
-$("cambiar").onclick = () => { $("paso2").classList.add("oculto"); $("paso1").classList.remove("oculto"); $("wrap").classList.remove("ancho"); };
+$("cambiar").onclick = () => { cerrarFiltro(); $("paso2").classList.add("oculto"); $("paso1").classList.remove("oculto"); $("wrap").classList.remove("ancho"); };
 
 cargar();
 </script>
