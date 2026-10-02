@@ -107,13 +107,23 @@
    GID: número de la pestaña "Daily Books" (aparece en la URL como #gid=XXXX) */
 const PUB_ID = "2PACX-1vTragpew-yDOnQFVpy4C0DwlYiMr_nATjoWIUZ6a5JlDGciEeP4ZOHrTAHUzw1Ts3JVwV_qUcKKjOx2";
 const GID    = "1925960605";
-const COL_FECHA  = 7;   // Columna H (A=0, B=1, ... H=7)
-const COL_REP    = 8;   // Columna I
-const NUM_COLS   = 9;   // Columnas que se muestran en la tabla: A a I
+// Las columnas se localizan por el texto del encabezado (fila 1), así que
+// aunque se agreguen o muevan columnas en el archivo, la página las sigue encontrando.
+const ENCABEZADO_FECHA = "booked";   // columna de fecha que filtra (contiene "Booked")
+const ENCABEZADO_REP   = "rep";      // columna del Rep (contiene "REP", ej. "CARRIER REP")
+
+// Reps que aparecen en la lista (se escriben tal cual se quieren mostrar)
+const REPS_PERMITIDOS = [
+  "Uriel Castellanos",
+  "Ulises Meneses",
+  "Juan Pablo Ibarra",
+  "Montserrat Nájera",
+];
 /* ================================================= */
 
 const $ = id => document.getElementById(id);
 let encabezados = [], filas = [];
+let COL_FECHA = 8, COL_REP = 9;   // valores de respaldo; se recalculan al leer el archivo
 
 // Fecha de hoy en formato dd/mm/aaaa
 const hoy = new Date();
@@ -143,16 +153,6 @@ const norm = s => String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
 // Separa celdas con varios Reps ("Ana / Luis")
 const partesRep = v => String(v||"").split("/").map(s => s.trim()).filter(Boolean);
 
-// Normaliza fechas a dd/mm/aaaa (acepta 1/9/2026, 01/09/2026, 2026-09-01)
-function normFecha(v){
-  const s = String(v||"").trim();
-  let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
-  if (m) return `${pad(m[1])}/${pad(m[2])}/${m[3]}`;
-  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) return `${pad(m[3])}/${pad(m[2])}/${m[1]}`;
-  return s;
-}
-
 // Lector de CSV que respeta comillas y saltos de línea dentro de celdas
 function parseCSV(txt){
   const out=[]; let fila=[], celda="", q=false;
@@ -177,17 +177,21 @@ async function cargar(){
     const r = await fetch(url);
     if(!r.ok) throw new Error(r.status);
     const datos = parseCSV(await r.text());
-    encabezados = (datos[0] || []).slice(0, NUM_COLS);   // Fila 1, columnas A–I
-    filas = datos.slice(1).filter(f => f.some(c => String(c).trim()!==""));
+    const fila1 = datos[0] || [];
 
-    // Lista de Reps únicos de la columna I
-    const reps = [...new Map(
-      filas.flatMap(f => partesRep(f[COL_REP])).map(v => [norm(v), v])
-    ).values()].sort((a,b)=>a.localeCompare(b,"es"));
+    // Busca las columnas por su encabezado
+    const iRep   = fila1.findIndex(h => norm(h).split(/\s+/).includes(ENCABEZADO_REP));
+    const iFecha = fila1.findIndex(h => norm(h).includes(ENCABEZADO_FECHA));
+    if (iRep   >= 0) COL_REP   = iRep;
+    if (iFecha >= 0) COL_FECHA = iFecha;
+
+    // La tabla muestra desde la columna A hasta la columna del Rep, con los títulos de la fila 1
+    encabezados = fila1.slice(0, COL_REP + 1);
+    filas = datos.slice(1).filter(f => f.some(c => String(c).trim()!==""));
 
     const sel = $("rep");
     sel.innerHTML = `<option value="">Selecciona tu nombre…</option>` +
-      reps.map(r => `<option>${esc(r)}</option>`).join("");
+      REPS_PERMITIDOS.map(r => `<option>${esc(r)}</option>`).join("");
     sel.disabled = false;
     sel.onchange = () => $("confirmar").disabled = !sel.value;
     $("msg1").textContent = "";
